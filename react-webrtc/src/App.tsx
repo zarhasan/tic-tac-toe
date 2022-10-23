@@ -1,8 +1,8 @@
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { Peer } from 'peerjs';
-import { useEffect, useMemo, useState } from 'react';
+import { DataConnection, Peer } from 'peerjs';
+import { useEffect, useState } from 'react';
+import toast, { Toaster } from 'react-hot-toast';
 import QRCode from 'react-qr-code';
-import { tw } from 'twind';
 
 import { Dialog } from '@headlessui/react';
 
@@ -18,6 +18,8 @@ type Board = {
   setWinner(turn: Player): void;
   solution: number[];
   setSolution(solution: Pick<Board, "solution">): void;
+  connection: DataConnection;
+  player: Player | null;
 };
 
 const peer = new Peer();
@@ -42,8 +44,8 @@ function App() {
   const [connectionID, setConnectionID] = useState<null | string>(null);
   const [isQRCodeOpen, setIsQRCodeOpen] = useState(false);
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
-  const [message, setMessage] = useState("");
+  const [connection, setConnection] = useState<DataConnection | null>(null);
+  const [player, setPlayer] = useState<null | "O" | "X">(null);
 
   console.log(peerID, connectionID);
 
@@ -53,60 +55,74 @@ function App() {
     });
 
     peer?.on("connection", function (connection) {
-      console.log(connection.connectionId);
-      connection.on("open", function () {
-        setIsQRScannerOpen(false);
-        setIsQRCodeOpen(false);
-        setIsConnected(true);
-        connection.on("data", function (data) {
-          alert(data);
-        });
-      });
+      setIsQRCodeOpen(false);
+      setConnection(connection);
+      setPlayer("X");
     });
   }, []);
 
-  const connection = useMemo(() => {
+  useEffect(() => {
     if (!connectionID) {
-      return null;
+      setPlayer("X");
+      return;
     }
 
-    return peer.connect(connectionID);
+    setPlayer("O");
+
+    setConnection(peer.connect(connectionID));
   }, [connectionID]);
 
   useEffect(() => {
     connection?.on("open", function () {
-      // Receive messages
-      connection.on("data", function (data) {
-        console.log("Received", data);
-      });
+      connection.on("data", function (data: any) {
+        if (typeof data === "object") {
+          setValues(data.values);
 
-      setMessage("Hello!");
+          if (player) {
+            setTurn(player);
+          }
+
+          checkWinner();
+
+          if (data.reset) {
+            reset();
+          }
+
+          return;
+        }
+
+        toast.success(`${JSON.stringify(data)}`);
+      });
     });
   }, [connection]);
 
-  useEffect(() => {
-    connection?.send(message);
-  }, [message]);
-
-  function handleReset() {
+  function reset() {
     setTurn("X");
     setValues(tiles);
     setWinner(null);
     setSolution([]);
   }
 
+  function handleReset() {
+    reset();
+    connection?.send({ reset: true });
+  }
+
+  function checkWinner() {
+    solutions.forEach((solution: any) => {
+      if (
+        values[solution[0]] &&
+        values[solution[0]] === values[solution[1]] &&
+        values[solution[0]] === values[solution[2]]
+      ) {
+        setSolution(solution);
+        setWinner(values[solution[0]]);
+      }
+    });
+  }
+
   return (
     <div className="h-full min-h-screen flex flex-col justify-center items-center">
-      {isConnected && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-          }}
-        >
-          <textarea />
-          <textarea>Send Message</textarea>
-        </form>
-      )}
       <Dialog
         className="fixed inset-0 z-100 flex justify-center items-center"
         style={{ backgroundColor: "rgba(0,0,0,0.75)" }}
@@ -139,12 +155,30 @@ function App() {
         </Dialog.Panel>
       </Dialog>
 
-      <div>
-        <button onClick={() => setIsQRCodeOpen(true)}>Show QR code</button>
-        <button onClick={() => setIsQRScannerOpen(true)}>Scan QR code</button>
-      </div>
+      {!connection && (
+        <div className="w-96 mb-4 flex justify-start items-start gap-4 flex-wrap">
+          <button
+            className="bg-gray-100 rounded-full px-4 py-2 font-semibold mt-8"
+            onClick={() => setIsQRCodeOpen(true)}
+          >
+            Show QR code
+          </button>
+          <button
+            className="bg-gray-100 rounded-full px-4 py-2 font-semibold mt-8"
+            onClick={() => setIsQRScannerOpen(true)}
+          >
+            Scan QR code
+          </button>
+        </div>
+      )}
 
-      <div className="w-96 mb-8 grid grid-cols-2 gap-4">
+      <div className="w-96 mb-8 grid grid-cols-3 gap-4">
+        {connection && (
+          <p className="flex flex-col justify-center items-center text-center bg-gray-50 p-6 rounded-lg">
+            <span className="font-semibold text-sm text-gray-600">You Are</span>
+            <span className="text-2xl font-semibold">{player}</span>
+          </p>
+        )}
         <p className="flex flex-col justify-center items-center text-center bg-gray-50 p-6 rounded-lg">
           <span className="font-semibold text-sm text-gray-600">Turn</span>
           <span className="text-2xl font-semibold">{turn}</span>
@@ -157,6 +191,7 @@ function App() {
 
       <Board
         winner={winner}
+        player={player}
         setWinner={setWinner}
         solution={solution}
         setSolution={setSolution}
@@ -165,6 +200,8 @@ function App() {
         solutions={solutions}
         turn={turn}
         setTurn={setTurn}
+        connection={connection}
+        checkWinner={checkWinner}
       />
 
       <div className="flex justify-center">
@@ -175,6 +212,37 @@ function App() {
           Reset Board
         </button>
       </div>
+
+      {connection && (
+        <form
+          className="w-96 mt-8 bg-gray-50 rounded-lg p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const formData = new FormData(e.currentTarget);
+
+            connection?.send(formData.get("message"));
+
+            e.currentTarget.reset();
+          }}
+        >
+          <textarea
+            placeholder="Message"
+            name="message"
+            className="border-2 border-gray-200 p-4 rounded-lg w-full"
+          ></textarea>
+          <button className="bg-green-600 text-white px-4 py-2 rounded-full font-bold mt-2">
+            Send Message
+          </button>
+        </form>
+      )}
+
+      <Toaster
+        position="top-center"
+        reverseOrder={false}
+        gutter={8}
+        containerClassName=""
+        containerStyle={{}}
+      />
     </div>
   );
 }
@@ -189,9 +257,12 @@ const Board = ({
   setWinner,
   solution,
   setSolution,
+  player,
+  connection,
+  checkWinner,
 }: Board) => {
   const handleTileClick = (index: number) => {
-    if (values[index] || winner) {
+    if (values[index] || winner || (connection && player != turn)) {
       return;
     }
 
@@ -199,18 +270,16 @@ const Board = ({
     newData[index] = turn;
 
     setValues(newData);
-    setTurn(turn === "X" ? "O" : "X");
 
-    solutions.forEach((solution) => {
-      if (
-        values[solution[0]] &&
-        values[solution[0]] === values[solution[1]] &&
-        values[solution[0]] === values[solution[2]]
-      ) {
-        setSolution(solution);
-        setWinner(values[solution[0]]);
-      }
-    });
+    if (connection) {
+      setTurn(player === "X" ? "O" : "X");
+    } else {
+      setTurn(turn === "X" ? "O" : "X");
+    }
+
+    connection?.send({ values: newData });
+
+    checkWinner();
   };
 
   return (
@@ -221,8 +290,8 @@ const Board = ({
             disabled={winner !== null || value !== null}
             className={`border-2 border-gray-200 h-24 rounded-lg font-semibold flex justify-center items-center text-xl disabled:text-gray-500 disabled:bg-gray-100 ${
               solution.includes(index) &&
-              tw("!bg-green-100 !text-green-600 !border-green-200")
-            }`}
+              "!bg-green-100 !text-green-600 !border-green-200"
+            } ${!winner && !value && turn === player && "!border-green-200"}`}
             key={index}
             onClick={(e) => handleTileClick(index)}
           >
@@ -234,12 +303,7 @@ const Board = ({
   );
 };
 
-function QRScanner({
-  isQRScannerOpen,
-  setIsQRScannerOpen,
-  connectionID,
-  setConnectionID,
-}) {
+function QRScanner({ setIsQRScannerOpen, setConnectionID }: any) {
   useEffect(() => {
     let html5QrcodeScanner = new Html5QrcodeScanner(
       "reader",
