@@ -1,4 +1,4 @@
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 import { DataConnection, Peer } from 'peerjs';
 import { useEffect, useState } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
@@ -9,22 +9,23 @@ import { Dialog } from '@headlessui/react';
 type Player = "X" | "O";
 
 type Board = {
-  solutions: [][];
+  solutions: number[][];
   values: string[];
   setValues(values: string[]): void;
   turn: Player;
   setTurn(turn: Player): void;
-  winner: Player;
-  setWinner(turn: Player): void;
+  winner: Player | null;
+  setWinner(turn: Player | null): void;
   solution: number[];
-  setSolution(solution: Pick<Board, "solution">): void;
-  connection: DataConnection;
+  setSolution(solution: number[]): void;
+  connection: DataConnection | null;
   player: Player | null;
+  checkWinner(): void;
 };
 
 const peer = new Peer();
 function App() {
-  const solutions = [
+  const solutions: number[][] = [
     [0, 1, 2],
     [0, 3, 6],
     [0, 4, 8],
@@ -36,9 +37,9 @@ function App() {
   ];
   const tiles = new Array(9).fill(null);
 
-  const [winner, setWinner] = useState(null);
-  const [solution, setSolution] = useState([]);
-  const [turn, setTurn] = useState("X");
+  const [winner, setWinner] = useState<Player | null>(null);
+  const [solution, setSolution] = useState<number[]>([]);
+  const [turn, setTurn] = useState<Player>("X");
   const [values, setValues] = useState(tiles);
   const [peerID, setPeerID] = useState<null | string>(null);
   const [connectionID, setConnectionID] = useState<null | string>(null);
@@ -307,7 +308,11 @@ function QRScanner({ setIsQRScannerOpen, setConnectionID }: any) {
   useEffect(() => {
     let html5QrcodeScanner = new Html5QrcodeScanner(
       "reader",
-      { fps: 10, qrbox: { width: 250, height: 250 } },
+      {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+      },
       false
     );
     html5QrcodeScanner.render(
